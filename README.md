@@ -64,4 +64,5 @@ test-task/
 ```
 
 # ERD-схема бд
-<img width="988" height="642" alt="image" src="https://github.com/user-attachments/assets/04dabcf5-46e5-4bea-824c-2b5c97c8f7ec" />
+<img width="1035" height="706" alt="image" src="https://github.com/user-attachments/assets/084bb3c0-2ebd-4f6e-a6c2-f526f99f2723" />
+
