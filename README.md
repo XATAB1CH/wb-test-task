@@ -62,3 +62,6 @@ test-task/
 │
 └── README.md
 ```
+
+# ERD-схема бд
+<img width="988" height="642" alt="image" src="https://github.com/user-attachments/assets/04dabcf5-46e5-4bea-824c-2b5c97c8f7ec" />
