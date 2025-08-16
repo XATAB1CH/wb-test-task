@@ -6,55 +6,58 @@ import (
 	"time"
 )
 
-type LRUCache struct {
-	capacity int
-	ttl      time.Duration
-	items    map[string]*list.Element
-	list     *list.List
-	mu       sync.Mutex
+type LRUCache struct { // LRU значит Least Recently Used - наименее используемый в данный момент
+	capacity int // количество элементов в кэше
+	ttl      time.Duration // время жизни элемента в кэше
+	items    map[string]*list.Element // map для хранения элементов
+	list     *list.List // список для хранения элементов в порядке использования
+	mu       sync.Mutex // мьютекс для синхронизации доступа к кэшу
 }
 
 type cacheItem struct {
-	key       string
-	value     interface{}
-	expiresAt time.Time
+	key       string // ключ
+	value     interface{} // значение
+	expiresAt time.Time // время истечения срока действия
 }
 
 func NewLRUCache(capacity int, ttl time.Duration) *LRUCache {
 	return &LRUCache{
 		capacity: capacity,
 		ttl:      ttl,
-		items:    make(map[string]*list.Element),
-		list:     list.New(),
+		items:    make(map[string]*list.Element), // инициализируем map
+		list:     list.New(), // инициализируем список
 	}
 }
 
+// Добавляем элемент в кэш или обновляем существующий
 func (c *LRUCache) Set(key string, value interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if elem, exists := c.items[key]; exists {
-		c.list.MoveToFront(elem)
+	if elem, exists := c.items[key]; exists { // если элемент уже существует, обновляем его
+		c.list.MoveToFront(elem) // перемещаем элемент в начало списка
 		elem.Value.(*cacheItem).value = value
 		elem.Value.(*cacheItem).expiresAt = time.Now().Add(c.ttl)
 		return
 	}
 
-	if c.list.Len() >= c.capacity {
+	if c.list.Len() >= c.capacity { // если кэш заполнен, удаляем самый старый элемент
 		oldest := c.list.Back()
 		delete(c.items, oldest.Value.(*cacheItem).key)
 		c.list.Remove(oldest)
 	}
 
-	item := &cacheItem{
+	item := &cacheItem{ // создаем новый элемент
 		key:       key,
 		value:     value,
 		expiresAt: time.Now().Add(c.ttl),
 	}
-	elem := c.list.PushFront(item)
-	c.items[key] = elem
+
+	elem := c.list.PushFront(item) // добавляем элемент в начало списка
+	c.items[key] = elem // добавляем элемент в map
 }
 
+// Получаем элемент из кэша по ключу
 func (c *LRUCache) Get(key string) (interface{}, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -64,7 +67,7 @@ func (c *LRUCache) Get(key string) (interface{}, bool) {
 		return nil, false
 	}
 
-	if time.Now().After(elem.Value.(*cacheItem).expiresAt) {
+	if time.Now().After(elem.Value.(*cacheItem).expiresAt) { // если элемент устарел, удаляем его
 		c.list.Remove(elem)
 		delete(c.items, key)
 		return nil, false

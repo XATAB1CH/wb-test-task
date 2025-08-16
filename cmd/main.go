@@ -3,37 +3,45 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gin-gonic/gin"
+
 	"wb-test-task/config"
 	"wb-test-task/internal/cache"
 	"wb-test-task/internal/db"
 	"wb-test-task/internal/kafka"
 	"wb-test-task/internal/models"
+	"wb-test-task/internal/routes"
 	"wb-test-task/internal/service"
-	"wb-test-task/internal/handlers"
 )
 
 func main() {
-	cfg := config.LoadConfig() // загружаем данные окружения
+	cfg := config.LoadConfig()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // установка таймаута на 10 секунд
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pgPool, err := db.NewPostgresPool(ctx, cfg) // подключение к БД
+	// Подключение к PostgreSQL
+	pgPool, err := db.NewPostgresPool(ctx, cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
 	}
 	defer pgPool.Close()
 
-	repo := db.NewRepository(pgPool) // инициализация репозитория
-	cache := cache.NewLRUCache(1000, 10*time.Minute) // инициализация кэша
-	svc := service.NewOrderService(repo, cache) // инициализация сервиса
+	repo := db.NewRepository(pgPool)
 
-	kafkaConsumer := kafka.NewConsumer(cfg, func(order models.Order) error { // второй переменной передаётся функция, которая будет вызываться при получении сообщения. это функция обработчик
+	// Инициализация кэша
+	cache := cache.NewLRUCache(1000, 10*time.Minute)
+
+	// Сервис заказов
+	svc := service.NewOrderService(repo, cache)
+
+	// Kafka consumer
+	kafkaConsumer := kafka.NewConsumer(cfg, func(order models.Order) error {
 		return svc.ProcessOrder(context.Background(), order)
 	})
 	defer kafkaConsumer.Close()
@@ -43,29 +51,24 @@ func main() {
 			log.Printf("Kafka consumer error: %v", err)
 		}
 	}()
-	
-	// поднимаем сервер
-	server := &http.Server{
-		Addr:    ":8081",
-		Handler: handlers.NewRouter(svc),
-	}
 
+	// Создаём Gin router
+	router := gin.Default()
+	router.LoadHTMLGlob("./internal/templates/*") // загрузка шаблонов
+
+	routes.InitRoutes(router, svc) // подключаем маршруты
+
+	// Канал для graceful shutdown
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+	// Запуск сервера
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+		if err := router.Run(":8081"); err != nil {
+			log.Fatalf("Gin server error: %v", err)
 		}
 	}()
 
 	<-done
 	log.Println("Server is shutting down...")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP server shutdown error: %v", err)
-	}
 }

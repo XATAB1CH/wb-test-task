@@ -96,7 +96,96 @@ func (r *Repository) SaveOrder(ctx context.Context, order models.Order) error {
 }
 
 func (r *Repository) GetOrder(ctx context.Context, orderUID string) (*models.Order, error) {
-	// Реализация запроса к БД для получения полного заказа
-	// ...
-	return nil, nil
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction failed: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var order models.Order
+
+	// 1. Получаем основную информацию о заказе
+	err = tx.QueryRow(ctx, `
+        SELECT 
+            order_uid, track_number, entry, locale, 
+            internal_signature, customer_id, delivery_service, 
+            shardkey, sm_id, date_created, oof_shard
+        FROM public.orders 
+        WHERE order_uid = $1`, orderUID).
+		Scan(
+			&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale,
+			&order.InternalSignature, &order.CustomerID, &order.DeliveryService,
+			&order.ShardKey, &order.SMID, &order.DateCreated, &order.OOFShard,
+		)
+	if err != nil {
+		return nil, fmt.Errorf("select order failed: %w", err)
+	}
+
+	// 2. Получаем информацию о доставке
+	err = tx.QueryRow(ctx, `
+        SELECT 
+            name, phone, zip, city, address, region, email
+        FROM public.deliveries 
+        WHERE order_uid = $1`, orderUID).
+		Scan(
+			&order.Delivery.Name, &order.Delivery.Phone, &order.Delivery.Zip,
+			&order.Delivery.City, &order.Delivery.Address, &order.Delivery.Region,
+			&order.Delivery.Email,
+		)
+	if err != nil {
+		return nil, fmt.Errorf("select delivery failed: %w", err)
+	}
+
+	// 3. Получаем информацию об оплате
+	err = tx.QueryRow(ctx, `
+        SELECT 
+            transaction, request_id, currency, provider, amount, 
+            payment_dt, bank, delivery_cost, goods_total, custom_fee
+        FROM public.payments 
+        WHERE order_uid = $1`, orderUID).
+		Scan(
+			&order.Payment.Transaction, &order.Payment.RequestID, &order.Payment.Currency,
+			&order.Payment.Provider, &order.Payment.Amount, &order.Payment.PaymentDT,
+			&order.Payment.Bank, &order.Payment.DeliveryCost, &order.Payment.GoodsTotal,
+			&order.Payment.CustomFee,
+		)
+	if err != nil {
+		return nil, fmt.Errorf("select payment failed: %w", err)
+	}
+
+	// 4. Получаем товары в заказе
+	rows, err := tx.Query(ctx, `
+        SELECT 
+            chrt_id, track_number, price, rid, name, 
+            sale, size, total_price, nm_id, brand, status
+        FROM public.items 
+        WHERE order_uid = $1`, orderUID)
+	if err != nil {
+		return nil, fmt.Errorf("select items failed: %w", err)
+	}
+	defer rows.Close()
+
+	order.Items = make([]models.Item, 0)
+	for rows.Next() {
+		var item models.Item
+		err = rows.Scan(
+			&item.ChrtID, &item.TrackNumber, &item.Price, &item.RID,
+			&item.Name, &item.Sale, &item.Size, &item.TotalPrice,
+			&item.NMID, &item.Brand, &item.Status,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan item failed: %w", err)
+		}
+		order.Items = append(order.Items, item)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration failed: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction failed: %w", err)
+	}
+
+	return &order, nil
 }

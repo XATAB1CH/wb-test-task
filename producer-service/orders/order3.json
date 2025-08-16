@@ -1,0 +1,62 @@
+{
+  "order_uid": "c456feb7b2b84b8test",
+  "track_number": "TRACK789012",
+  "entry": "ENTRY2",
+  "delivery": {
+    "name": "John Smith",
+    "phone": "+441234567890",
+    "zip": "SW1A 1AA",
+    "city": "London",
+    "address": "10 Downing Street",
+    "region": "England",
+    "email": "john.smith@example.com"
+  },
+  "payment": {
+    "transaction": "c456feb7b2b84b8test",
+    "request_id": "req456",
+    "currency": "GBP",
+    "provider": "stripe",
+    "amount": 12000,
+    "payment_dt": 1637920000,
+    "bank": "barclays",
+    "delivery_cost": 1000,
+    "goods_total": 11000,
+    "custom_fee": 0
+  },
+  "items": [
+    {
+      "chrt_id": 1122334,
+      "track_number": "TRACK789012",
+      "price": 8000,
+      "rid": "gh1234567a764ae0test",
+      "name": "TV",
+      "sale": 15,
+      "size": "1",
+      "total_price": 6800,
+      "nm_id": 5566778,
+      "brand": "Samsung",
+      "status": 201
+    },
+    {
+      "chrt_id": 4455667,
+      "track_number": "TRACK789012",
+      "price": 5000,
+      "rid": "ij1234567a764ae0test",
+      "name": "Headphones",
+      "sale": 10,
+      "size": "1",
+      "total_price": 4500,
+      "nm_id": 3344556,
+      "brand": "Sony",
+      "status": 202
+    }
+  ],
+  "locale": "en",
+  "internal_signature": "signature2",
+  "customer_id": "customer2",
+  "delivery_service": "dhl",
+  "shardkey": "7",
+  "sm_id": 77,
+  "date_created": "2021-11-28T15:20:45Z",
+  "oof_shard": "3"
+}

@@ -1,0 +1,46 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wb-test-task</title>
+    <link rel="stylesheet" href="styles/bootstrap.css">
+</head>
+<body>
+    <header data-bs-theme="dark">
+        <div class="navbar navbar-dark bg-dark shadow-sm" style="height: auto;">
+              <div class="m-5">
+                <a class="navbar-brand d-flex align-items-center">
+                  <img src="assets/images/gopher.png" alt="icon" height="30" width="30" class="me-2">
+                  <strong>Заказы</strong>
+                </a>
+              </div>
+        </div>
+      </header>
+      <main>
+        <section class="py-5 text-center container">
+          <div class="row py-lg-5">
+            <div class="col-lg-6 col-md-8 mx-auto">
+              <h1 class="fw-light">Найти заказ по id</h1>
+              <form id="orderForm">
+                <div class="d-flex flex-row align-items-center justify-content-between">
+                  <input type="text" class="form-control" id="orderId" name="orderId" placeholder="uid" style="width: 350;" required>
+                  <a class="navbar-brand d-flex align-items-center">
+                    <img src="assets/images/loupe.svg" alt="icon" height="50" width="50" class="me-2">
+                    <button type="submit" class="btn btn-primary " style="width: 200">Найти</button>
+                  </a>
+                </div>
+              </form>
+            </div>
+          </div>    
+        </section>
+      </main>
+    </body>
+
+    <script>
+        document.getElementById('orderForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const orderId = document.getElementById('orderId').value;
+            window.location.href = `http://localhost:8081/order/${orderId}`;
+        });
+    </script>
+</html>

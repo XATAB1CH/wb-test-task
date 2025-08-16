@@ -4,31 +4,32 @@ import (
 	"encoding/json"
 	"net/http"
 	"wb-test-task/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
-func NewRouter(svc *service.OrderService) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/order/", getOrderHandler(svc))
-	return mux
+type OrderHandler struct {
+	svc *service.OrderService
 }
 
-// Хендлер для получения заказа по UID
-func getOrderHandler(svc *service.OrderService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		orderUID := r.URL.Path[len("/order/"):]
-		if orderUID == "" {
-			http.Error(w, "Требуется корректны UID", http.StatusBadRequest)
-			return
-		}
+func NewOrderHandler(svc *service.OrderService) *OrderHandler {
+	return &OrderHandler{svc: svc}
+}
 
-		order, err := svc.GetOrder(r.Context(), orderUID)
-		if err != nil {
-			http.Error(w, "Заказ не найден", http.StatusNotFound)
-			return
-		}
+// Хендлер получения заказа по UID
+func (h *OrderHandler) GetOrderByUID(c *gin.Context) {
+	ctx := c.Request.Context() // достаём контекст из запроса
 
-		respondWithJSON(w, http.StatusOK, order)
+	uid := c.Param("orderId")
+
+	order, err := h.svc.GetOrder(ctx, uid)
+	if err != nil { // Если возникла ошибка, возвращаем HTTP статус 500 и сообщение об ошибке
+		respondWithJSON(c.Writer, http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
+
+	// Если все хорошо, возвращаем HTTP статус 200 и заказ
+	respondWithJSON(c.Writer, http.StatusOK, order)
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {

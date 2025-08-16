@@ -38,11 +38,14 @@ func (s *OrderService) ProcessOrder(ctx context.Context, order models.Order) err
 func (s *OrderService) GetOrder(ctx context.Context, orderUID string) (*models.Order, error) {
 	// Проверяем, есть ли заказ в кэше
 	if cached, exists := s.cache.Get(orderUID); exists {
-		return cached.(*models.Order), nil // Возвращаем заказ из кэша
+		fmt.Println("Заказ найден в кэше")
+		return *(cached.(**models.Order)), nil // Возвращаем заказ из кэша
 	}
 
 	// Если заказа нет в кэше, получаем из БД
 	order, err := s.repo.GetOrder(ctx, orderUID)
+	fmt.Println("Заказ найден в БД")
+	
 	if err != nil {
 		return nil, fmt.Errorf("Ошибка получения заказа из БД: %w", err)
 	}
