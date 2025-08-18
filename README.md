@@ -71,6 +71,10 @@ wb-test-task/
 │   ├── docker-compose.yml          
 │   └── backend.Dockerfile
 │
+├── go.mod
+├── go.sum
+├── .gitignore
+├── .env
 └── README.md
 ```
 
