@@ -36,28 +36,39 @@
 
 # Структура проекта
 ```
-test-task/
+wb-test-task/
+│                      
+├── cmd/
+│   └── main.go  
 │
-├── webapi/                       
-│   ├── cmd/
-│   │   └── main.go                 
-│   ├── internal/
-│   ├── ├── config/                 # Конфиг
-│   │   ├── kafka/                  # Kafka
-│   │   ├── db/                     # PostgreSQL
-│   │   ├── cache/                  # Кэш в памяти
-│   │   ├── api/                    # Gin endpoints
-│   │   └── models/                 # Структуры данных
+├── config/ config.go
+│
+├── deployments/
+│   ├── docker-compose.yml
+│   └── Dockerfile
+│
+├── internal/
+│   ├── assets/                 
+│   │   ├── images/ .jpg                
+│   │   ├── scripts/ .css                  
+│   │   └── styles/ .js 
+│   │                             
+│   ├── cache/ cache.go
+│   ├── db/ repository.go
+│   ├── handlers/ api.go
+│   ├── kafka/ kafka.go
+│   ├── models/ modles.go
+│   ├── routes/ routes.go
+│   ├── service/ order_service.go
+│   └── templates/ index.html
+│  
+├── producer-service/ producer.go                  
+│   ├── orders/ .json
 │   ├── go.mod
 │   └── go.sum
 │
-├── frontend/                       
-│   ├── index.html                  # Форма поиска заказа
-│   ├── style.css
-│   └── script.js                   # fetch запросы к API
-│
 ├── deployments/
-│   ├── docker-compose.yml          # Поднимает все сервисы
+│   ├── docker-compose.yml          
 │   └── backend.Dockerfile
 │
 └── README.md
@@ -65,4 +76,3 @@ test-task/
 
 # ERD-схема бд
 <img width="1035" height="706" alt="image" src="https://github.com/user-attachments/assets/084bb3c0-2ebd-4f6e-a6c2-f526f99f2723" />
-
