@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -35,10 +36,17 @@ func main() {
 	repo := db.NewRepository(pgPool)
 
 	// Инициализация кэша
-	cache := cache.NewLRUCache(1000, 10*time.Minute)
+	myCache := cache.NewLRUCache(1000, 10*time.Minute)
+
+	// Восстанавливаем кэш из БД
+	if err := myCache.Restore(ctx, repo); err != nil {
+		log.Fatalf("Failed to restore cache: %v", err)
+	}
+
+	fmt.Println(myCache)
 
 	// Сервис заказов
-	svc := service.NewOrderService(repo, cache)
+	svc := service.NewOrderService(repo, myCache)
 
 	// Kafka consumer
 	kafkaConsumer := kafka.NewConsumer(cfg, func(order models.Order) error {

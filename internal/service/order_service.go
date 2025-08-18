@@ -30,7 +30,7 @@ func (s *OrderService) ProcessOrder(ctx context.Context, order models.Order) err
 		return fmt.Errorf("Не удалось сохранить заказ: %w", err)
 	}
 
-	s.cache.Set(order.OrderUID, &order) // Добавляем в кэш
+	// s.cache.Set(order.OrderUID, &order) // Добавляем в кэш
 	return nil
 }
 
@@ -39,17 +39,23 @@ func (s *OrderService) GetOrder(ctx context.Context, orderUID string) (*models.O
 	// Проверяем, есть ли заказ в кэше
 	if cached, exists := s.cache.Get(orderUID); exists {
 		fmt.Println("Заказ найден в кэше")
-		return *(cached.(**models.Order)), nil // Возвращаем заказ из кэша
+
+		return cached.(*models.Order), nil // Возвращаем заказ из кэша
 	}
 
-	// Если заказа нет в кэше, получаем из БД
+	// Если заказа нет в кэше, получаем из БД и добавляем в кэш
 	order, err := s.repo.GetOrder(ctx, orderUID)
+	if err != nil {
+		return nil, fmt.Errorf("Ошибка получения заказа из БД: %w", err)
+	}
+	s.cache.Set(order.OrderUID, &order)
+
 	fmt.Println("Заказ найден в БД")
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("Ошибка получения заказа из БД: %w", err)
 	}
 
-	s.cache.Set(orderUID, &order)
+	s.cache.Set(orderUID, order)
 	return order, nil
 }

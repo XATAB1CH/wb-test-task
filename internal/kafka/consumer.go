@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 	"wb-test-task/config"
@@ -21,6 +22,7 @@ func NewConsumer(cfg *config.Config, handler func(models.Order) error) *Consumer
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers:  []string{cfg.KafkaBrokers},
 			Topic:    cfg.KafkaTopic,
+			GroupID:  "orders-consumer-group", // <-- обязательно
 			MinBytes: 1e3,
 			MaxBytes: 1e6,
 		}),
@@ -47,9 +49,19 @@ func (c *Consumer) Consume(ctx context.Context) error {
 				continue
 			}
 
+			// Обработка (сохранение в БД)
 			if err := c.handler(order); err != nil {
-				log.Printf("Ошибка декодирования заказа %s: %v", order.OrderUID, err)
+				log.Printf("Ошибка обработки заказа %s: %v", order.OrderUID, err)
+				// ❌ оффсет не коммитим → сообщение придет снова
+				continue
 			}
+
+			// ✅ только если всё прошло успешно → коммитим оффсет
+			if err := c.reader.CommitMessages(ctx, msg); err != nil {
+				log.Printf("Ошибка при коммите оффсета: %v", err)
+			}
+
+			fmt.Printf("JSON файл %s обработан!\n", order.OrderUID)
 		}
 	}
 }

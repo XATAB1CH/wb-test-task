@@ -1,51 +1,18 @@
-@import url('https://fonts.googleapis.com/css?family=PT+Sans');
-
-body{
-  background: #fff;
-  font-family: 'PT Sans', sans-serif;
-}
-h2{
-  padding-top: 1.5rem;
-}
-a{
-  color: #333;
-}
-a:hover{
-  color: #9257da;
-  text-decoration: none;
-}
-.container{
-  text-align: center;
-}
-.card{
-  top: 10%;
-}
-.form-control{
-  background-color: #f8f9fa;
-  padding: 20px;
-  padding: 25px 15px;
-  margin-bottom: 1.3rem;
+#orderResult {
+    display: none;
+    text-align: left;
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 400px;
 }
 
-.form-control:focus {
-
-    color: #000000;
-    background-color: #ffffff;
-    border: 3px solid #9257da;
-    outline: 0;
-    box-shadow: none;
-}
-
-.btn{
-  padding: 0.6rem 1.2rem;
-  background: #9257da;
-  border: 2px solid #9257da;
-}
-.btn-primary:hover {
-
-    
-    background-color: #df8c96;
-    border-color: #df8c96;
-  transition: .3s;
-
-}
+.json-key { color: brown; }
+.json-string { color: green; }
+.json-number { color: blue; }
+.json-boolean { color: purple; }
+.json-null { color: red; }

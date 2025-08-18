@@ -33,3 +33,14 @@ services:
       - "9000:9000"
     environment:
       KAFKA_BROKERCONNECT: "kafka:9093"  # Используем внутреннее DNS-имя контейнера Kafka
+  
+  postgres:
+    image: postgres:15
+    container_name: wb-postgres
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+    ports:
+      - "5432:5432"
+    

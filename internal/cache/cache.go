@@ -2,22 +2,25 @@ package cache
 
 import (
 	"container/list"
+	"context"
+	"fmt"
 	"sync"
 	"time"
+	"wb-test-task/internal/db"
 )
 
 type LRUCache struct { // LRU значит Least Recently Used - наименее используемый в данный момент
-	capacity int // количество элементов в кэше
-	ttl      time.Duration // время жизни элемента в кэше
+	capacity int                      // количество элементов в кэше
+	ttl      time.Duration            // время жизни элемента в кэше
 	items    map[string]*list.Element // map для хранения элементов
-	list     *list.List // список для хранения элементов в порядке использования
-	mu       sync.Mutex // мьютекс для синхронизации доступа к кэшу
+	list     *list.List               // список для хранения элементов в порядке использования
+	mu       sync.Mutex               // мьютекс для синхронизации доступа к кэшу
 }
 
 type cacheItem struct {
-	key       string // ключ
-	value     interface{} // значение
-	expiresAt time.Time // время истечения срока действия
+	key       string      // ключ - orderUID
+	value     interface{} // значение - *models.Order
+	expiresAt time.Time   // время истечения срока действия
 }
 
 func NewLRUCache(capacity int, ttl time.Duration) *LRUCache {
@@ -25,7 +28,7 @@ func NewLRUCache(capacity int, ttl time.Duration) *LRUCache {
 		capacity: capacity,
 		ttl:      ttl,
 		items:    make(map[string]*list.Element), // инициализируем map
-		list:     list.New(), // инициализируем список
+		list:     list.New(),                     // инициализируем список
 	}
 }
 
@@ -54,7 +57,23 @@ func (c *LRUCache) Set(key string, value interface{}) {
 	}
 
 	elem := c.list.PushFront(item) // добавляем элемент в начало списка
-	c.items[key] = elem // добавляем элемент в map
+	c.items[key] = elem            // добавляем элемент в map
+}
+
+// Восстановка кэша из БД
+func (c *LRUCache) Restore(ctx context.Context, repo *db.Repository) error {
+	// Получаем все элементы из БД
+	orders, err := repo.GetAllOrders(ctx)
+	if err != nil {
+		return fmt.Errorf("Не удалось восстановить кэш из БД: %w", err)
+	}
+
+	// Записываем их в кэш
+	for _, order := range orders {
+		c.Set(order.OrderUID, &order)
+	}
+
+	return nil
 }
 
 // Получаем элемент из кэша по ключу

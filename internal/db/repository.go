@@ -189,3 +189,48 @@ func (r *Repository) GetOrder(ctx context.Context, orderUID string) (*models.Ord
 
 	return &order, nil
 }
+
+// Получить все заказы из БД
+func (r *Repository) GetAllOrders(ctx context.Context) ([]models.Order, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction failed: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var orders []models.Order
+
+	rows, err := tx.Query(ctx, `
+		SELECT 
+            order_uid, track_number, entry, locale, 
+            internal_signature, customer_id, delivery_service, 
+            shardkey, sm_id, date_created, oof_shard
+        FROM public.orders `)
+
+	if err != nil {
+		return nil, fmt.Errorf("scan of all orders failed: %w", err)
+	}
+
+	for rows.Next() {
+		var order models.Order
+		if err = rows.Scan(
+			&order.OrderUID, &order.TrackNumber, &order.Entry, &order.Locale,
+			&order.InternalSignature, &order.CustomerID, &order.DeliveryService,
+			&order.ShardKey, &order.SMID, &order.DateCreated, &order.OOFShard,
+		); err != nil {
+			return nil, fmt.Errorf("scan order failed: %w", err)
+		}
+
+		orders = append(orders, order)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration failed: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction failed: %w", err)
+	}
+
+	return orders, nil
+}
