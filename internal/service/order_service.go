@@ -21,7 +21,7 @@ func NewOrderService(repo *db.Repository, cache *cache.LRUCache) *OrderService {
 }
 
 // Функция ProcessOrder сохраняет заказ в БД и кэше
-func (s *OrderService) ProcessOrder(ctx context.Context, order models.Order) error {
+func (s *OrderService) SaveOrder(ctx context.Context, order models.Order) error {
 	if order.OrderUID == "" {
 		return fmt.Errorf("Пустой UID заказа")
 	}
@@ -51,10 +51,6 @@ func (s *OrderService) GetOrder(ctx context.Context, orderUID string) (*models.O
 	s.cache.Set(order.OrderUID, &order)
 
 	fmt.Println("Заказ найден в БД")
-
-	if err != nil {
-		return nil, fmt.Errorf("Ошибка получения заказа из БД: %w", err)
-	}
 
 	s.cache.Set(orderUID, order)
 	return order, nil

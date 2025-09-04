@@ -22,8 +22,8 @@ func NewConsumer(cfg *config.Config, handler func(models.Order) error) *Consumer
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers:  []string{cfg.KafkaBrokers},
 			Topic:    cfg.KafkaTopic,
-			GroupID:  "orders-consumer-group", // <-- обязательно
-			MinBytes: 1e3,
+			GroupID:  cfg.KafkaGroupID,
+			MinBytes: 1e3, // не уверен, нужно ли добавлять в конфиг
 			MaxBytes: 1e6,
 		}),
 		handler: handler,

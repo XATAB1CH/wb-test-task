@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,62 +20,84 @@ import (
 )
 
 func main() {
-	cfg := config.LoadConfig()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Подключение к PostgreSQL
-	pgPool, err := db.NewPostgresPool(ctx, cfg)
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
+		log.Fatalf("config load: %v", err)
 	}
-	defer pgPool.Close()
 
-	repo := db.NewRepository(pgPool)
+	webPort := os.Getenv("WEB_PORT")
+	if webPort == "" {
+		webPort = "8081"
+	}
 
-	// Инициализация кэша
-	myCache := cache.NewLRUCache(1000, 10*time.Minute)
+	// Контекст жизни приложения: отменится по SIGINT/SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := db.NewPostgresPool(ctx, cfg)
+	if err != nil {
+		log.Fatalf("postgres pool: %v", err)
+	}
+	defer pool.Close()
+
+	repo := db.NewRepository(pool)
+
+	lru := cache.NewLRUCache(cfg.CacheCapacity, cfg.CacheTTL)
+
+	svc := service.NewOrderService(repo, lru)
+
+	router := gin.Default()
+	router.Static("/assets", "./internal/assets")
+	router.LoadHTMLGlob("internal/templates/*")
+	routes.InitRoutes(router, svc)
+
+	srv := &http.Server{
+		Addr:    ":" + webPort,
+		Handler: router,
+	}
+
+	// Kafka consumer: пробрасываем общий ctx и обработчик
+	consumer := kafka.NewConsumer(cfg, func(o models.Order) error {
+		// используем общий контекст приложения — он отменится при shutdown
+		return svc.SaveOrder(ctx, o)
+	})
 
 	// Восстанавливаем кэш из БД
-	if err := myCache.Restore(ctx, repo); err != nil {
+	if err := lru.Restore(ctx, repo); err != nil {
 		log.Fatalf("Failed to restore cache: %v", err)
 	}
 
-	fmt.Println(myCache)
-
-	// Сервис заказов
-	svc := service.NewOrderService(repo, myCache)
-
-	// Kafka consumer
-	kafkaConsumer := kafka.NewConsumer(cfg, func(order models.Order) error {
-		return svc.ProcessOrder(context.Background(), order)
-	})
-	defer kafkaConsumer.Close()
-
+	// Старт consumer в отдельной горутине
 	go func() {
-		if err := kafkaConsumer.Consume(context.Background()); err != nil {
-			log.Printf("Kafka consumer error: %v", err)
+		if err := consumer.Consume(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("kafka consumer stopped with error: %v", err)
 		}
 	}()
 
-	// Создаём Gin router
-	router := gin.Default()
-	router.LoadHTMLGlob("./internal/templates/*") // загрузка шаблонов
-
-	routes.InitRoutes(router, svc) // подключаем маршруты
-
-	// Канал для graceful shutdown
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-	// Запуск сервера
+	// Старт HTTP-сервера
 	go func() {
-		if err := router.Run(":8081"); err != nil {
-			log.Fatalf("Gin server error: %v", err)
+		log.Printf("HTTP listening on :%s", webPort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http listen: %v", err)
 		}
 	}()
 
-	<-done
-	log.Println("Server is shutting down...")
+	<-ctx.Done()
+	log.Println("shutdown: signal received")
+
+	// Плавное завершение: даём время активным запросам и горутинам
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
+	defer cancel()
+
+	// Останоливаем HTTP server
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("http shutdown: %v", err)
+	}
+
+	// Закрываем consumer (разбудит блокирующие операции, Consume выйдет по ctx)
+	if err := consumer.Close(); err != nil {
+		log.Printf("kafka close: %v", err)
+	}
+
+	log.Println("graceful shutdown complete")
 }
