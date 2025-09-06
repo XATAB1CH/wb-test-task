@@ -36,7 +36,7 @@ type Payment struct {
 	OrderUID     string `json:"-" db:"order_uid"`
 	Transaction  string `json:"transaction" db:"transaction" validate:"required"`
 	RequestID    string `json:"request_id" db:"request_id" validate:"required"`
-	Currency    string `json:"currency" db:"currency" validate:"required,iso4217"`
+	Currency     string `json:"currency" db:"currency" validate:"required,iso4217"`
 	Provider     string `json:"provider" db:"provider" validate:"required"`
 	Amount       int    `json:"amount" db:"amount" validate:"required,gte=0"`
 	PaymentDT    int64  `json:"payment_dt" db:"payment_dt" validate:"required,gt=0"`

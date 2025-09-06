@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"wb-test-task/config"
+	"wb-test-task/internal/bootstrap"
 	"wb-test-task/internal/cache"
 	"wb-test-task/internal/db"
 	"wb-test-task/internal/kafka"
@@ -42,39 +45,39 @@ func main() {
 
 	repo := db.NewRepository(pool)
 
-	lru := cache.NewLRUCache(cfg.CacheCapacity, cfg.CacheTTL)
+	// Шардированный кэш (numShards, capacity, ttl)
+	lru := cache.NewShardedLRU[*models.Order](32, cfg.CacheCapacity, cfg.CacheTTL)
 
+	// Сервис поверх интерфейсов
 	svc := service.NewOrderService(repo, lru)
 
+	// Восстановление кэша из БД — отдельно от интерфейсов
+	if err := bootstrap.RestoreCacheFromDB(ctx, repo, lru); err != nil {
+		log.Fatalf("cache restore: %v", err)
+	}
+
+	// HTTP
 	router := gin.Default()
 	router.Static("/assets", "./internal/assets")
 	router.LoadHTMLGlob("internal/templates/*")
 	routes.InitRoutes(router, svc)
 
 	srv := &http.Server{
-		Addr:    ":" + webPort,
-		Handler: router,
+		Addr:              ":" + webPort,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	// Kafka consumer: пробрасываем общий ctx и обработчик
-	consumer := kafka.NewConsumer(cfg, func(o models.Order) error {
-		// используем общий контекст приложения — он отменится при shutdown
-		return svc.SaveOrder(ctx, o)
-	})
+	// Kafka consumer (актуальная сигнатура)
+	brokers := strings.Split(cfg.KafkaBrokers, ",")
+	groupID := cfg.KafkaGroupID
+	topic := cfg.KafkaTopic
+	consumer := kafka.NewConsumer(brokers, groupID, topic, repo, lru)
 
-	// Восстанавливаем кэш из БД
-	if err := lru.Restore(ctx, repo); err != nil {
-		log.Fatalf("Failed to restore cache: %v", err)
-	}
+	// Старт consumer
+	go func() { consumer.Run(ctx) }()
 
-	// Старт consumer в отдельной горутине
-	go func() {
-		if err := consumer.Consume(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("kafka consumer stopped with error: %v", err)
-		}
-	}()
-
-	// Старт HTTP-сервера
+	// Старт HTTP
 	go func() {
 		log.Printf("HTTP listening on :%s", webPort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -85,19 +88,13 @@ func main() {
 	<-ctx.Done()
 	log.Println("shutdown: signal received")
 
-	// Плавное завершение: даём время активным запросам и горутинам
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.HTTPShutdownTimeout)
 	defer cancel()
 
-	// Останоливаем HTTP server
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
 	}
 
-	// Закрываем consumer (разбудит блокирующие операции, Consume выйдет по ctx)
-	if err := consumer.Close(); err != nil {
-		log.Printf("kafka close: %v", err)
-	}
-
+	// consumer закрывается сам по отмене ctx внутри Run
 	log.Println("graceful shutdown complete")
 }

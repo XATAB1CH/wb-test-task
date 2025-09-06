@@ -3,69 +3,101 @@ package kafka
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log"
 	"time"
-	"wb-test-task/config"
-	"wb-test-task/internal/models"
 
 	"github.com/segmentio/kafka-go"
+
+	"wb-test-task/internal/models"
+	"wb-test-task/internal/ports"
+	"wb-test-task/internal/validation"
 )
 
 type Consumer struct {
-	reader  *kafka.Reader
-	handler func(models.Order) error
+	reader *kafka.Reader
+	repo   ports.OrderRepository
+	cache  ports.Cache[string, *models.Order]
 }
 
-func NewConsumer(cfg *config.Config, handler func(models.Order) error) *Consumer {
+func NewConsumer(brokers []string, groupID, topic string, repo ports.OrderRepository, cache ports.Cache[string, *models.Order]) *Consumer {
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:        brokers,
+		GroupID:        groupID,
+		Topic:          topic,
+		MinBytes:       1,
+		MaxBytes:       10e6,
+		CommitInterval: 0,
+	})
 	return &Consumer{
-		reader: kafka.NewReader(kafka.ReaderConfig{
-			Brokers:  []string{cfg.KafkaBrokers},
-			Topic:    cfg.KafkaTopic,
-			GroupID:  cfg.KafkaGroupID,
-			MinBytes: 1e3, // не уверен, нужно ли добавлять в конфиг
-			MaxBytes: 1e6,
-		}),
-		handler: handler,
+		reader: r,
+		repo:   repo,
+		cache:  cache,
 	}
 }
 
-func (c *Consumer) Consume(ctx context.Context) error {
+func (c *Consumer) Run(ctx context.Context) {
+	log.Printf("[kafka] consumer started (group=%q)", c.reader.Config().GroupID)
+	defer func() {
+		if err := c.reader.Close(); err != nil {
+			log.Printf("[kafka] reader close: %v", err)
+		}
+		log.Printf("[kafka] consumer stopped")
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		default:
-			msg, err := c.reader.ReadMessage(ctx) // читаем сообщение из Kafka
-			if err != nil {
-				log.Printf("Не получилось прочитать сообщение из Kafka: %v", err)
-				time.Sleep(1 * time.Second)
-				continue
-			}
+		}
 
-			var order models.Order // декодируем сообщение в структуру Order
-			if err := json.Unmarshal(msg.Value, &order); err != nil {
-				log.Printf("Не получилось декодировать JSON: %v", err)
-				continue
+		msg, err := c.reader.FetchMessage(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				log.Printf("[kafka] fetch canceled: %v", err)
+				return
 			}
+			log.Printf("[kafka] fetch: %v", err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
 
-			// Обработка (сохранение в БД)
-			if err := c.handler(order); err != nil {
-				log.Printf("Ошибка обработки заказа %s: %v", order.OrderUID, err)
-				// ❌ оффсет не коммитим → сообщение придет снова
-				continue
-			}
-
-			// ✅ только если всё прошло успешно → коммитим оффсет
-			if err := c.reader.CommitMessages(ctx, msg); err != nil {
-				log.Printf("Ошибка при коммите оффсета: %v", err)
-			}
-
-			fmt.Printf("JSON файл %s обработан!\n", order.OrderUID)
+		if err := c.processMessage(ctx, msg); err != nil {
+			log.Printf("[kafka] process: %v", err)
 		}
 	}
 }
 
-func (c *Consumer) Close() error {
-	return c.reader.Close()
+func (c *Consumer) processMessage(ctx context.Context, msg kafka.Message) error {
+	var order models.Order
+
+	if err := json.Unmarshal(msg.Value, &order); err != nil {
+		log.Printf("[kafka] bad json (partition=%d, offset=%d): %v", msg.Partition, msg.Offset, err)
+		if err2 := c.reader.CommitMessages(ctx, msg); err2 != nil {
+			log.Printf("[kafka] commit after bad json: %v", err2)
+		}
+		return nil
+	}
+
+	if err := validation.ValidateStruct(order); err != nil {
+		log.Printf("[kafka] validation failed (uid=%s, offset=%d): %v", order.OrderUID, msg.Offset, err)
+		if err2 := c.reader.CommitMessages(ctx, msg); err2 != nil {
+			log.Printf("[kafka] commit after validation error: %v", err2)
+		}
+		return nil
+	}
+
+	if err := c.repo.SaveOrder(ctx, order); err != nil {
+		log.Printf("[kafka] db save failed (uid=%s, offset=%d): %v", order.OrderUID, msg.Offset, err)
+		time.Sleep(300 * time.Millisecond)
+		return nil
+	}
+
+	c.cache.Set(order.OrderUID, &order)
+
+	if err := c.reader.CommitMessages(ctx, msg); err != nil {
+		log.Printf("[kafka] commit offset failed (uid=%s, offset=%d): %v", order.OrderUID, msg.Offset, err)
+	}
+	return nil
 }
