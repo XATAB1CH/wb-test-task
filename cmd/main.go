@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 
 	"wb-test-task/config"
 	"wb-test-task/internal/bootstrap"
-	"wb-test-task/internal/cache"
+	wbcache "wb-test-task/internal/cache"
 	"wb-test-task/internal/db"
 	"wb-test-task/internal/kafka"
 	"wb-test-task/internal/models"
@@ -25,16 +26,10 @@ import (
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("config load: %v", err)
+		log.Fatalf("load config: %v", err)
 	}
 
-	webPort := os.Getenv("WEB_PORT")
-	if webPort == "" {
-		webPort = "8081"
-	}
-
-	// Контекст жизни приложения: отменится по SIGINT/SIGTERM
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := db.NewPostgresPool(ctx, cfg)
@@ -45,41 +40,42 @@ func main() {
 
 	repo := db.NewRepository(pool)
 
-	// Шардированный кэш (numShards, capacity, ttl)
-	lru := cache.NewShardedLRU[*models.Order](32, cfg.CacheCapacity, cfg.CacheTTL)
-
-	// Сервис поверх интерфейсов
-	svc := service.NewOrderService(repo, lru)
-
-	// Восстановление кэша из БД — отдельно от интерфейсов
-	if err := bootstrap.RestoreCacheFromDB(ctx, repo, lru); err != nil {
-		log.Fatalf("cache restore: %v", err)
+	cache := wbcache.NewShardedLRU[*models.Order](16, cfg.CacheCapacity, cfg.CacheTTL)
+	if err := bootstrap.RestoreCacheFromDB(ctx, repo, cache); err != nil {
+		log.Printf("bootstrap cache: %v", err)
 	}
 
-	// HTTP
-	router := gin.Default()
-	router.Static("/assets", "./internal/assets")
-	router.LoadHTMLGlob("internal/templates/*")
-	routes.InitRoutes(router, svc)
+	svc := service.NewOrderService(repo, cache)
+
+	r := gin.Default()
+	r.Static("/assets", "./internal/assets")
+	r.LoadHTMLGlob("internal/templates/*")
+	r = routes.InitRoutes(r, svc)
 
 	srv := &http.Server{
-		Addr:              ":" + webPort,
-		Handler:           router,
+		Addr:              ":" + cfg.HTTPPort,
+		Handler:           r,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 
-	// Kafka consumer (актуальная сигнатура)
 	brokers := strings.Split(cfg.KafkaBrokers, ",")
-	groupID := cfg.KafkaGroupID
-	topic := cfg.KafkaTopic
-	consumer := kafka.NewConsumer(brokers, groupID, topic, repo, lru)
+	consumer := kafka.NewConsumer(brokers, cfg.KafkaGroupID, cfg.KafkaTopic, repo, cache)
 
-	// Старт consumer
-	go func() { consumer.Run(ctx) }()
+	var wg sync.WaitGroup
 
-	// Старт HTTP
+	wg.Add(1)
 	go func() {
-		log.Printf("HTTP listening on :%s", webPort)
+		defer wg.Done()
+		consumer.Run(ctx)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http listen: %v", err)
 		}
@@ -95,6 +91,6 @@ func main() {
 		log.Printf("http shutdown: %v", err)
 	}
 
-	// consumer закрывается сам по отмене ctx внутри Run
+	wg.Wait()
 	log.Println("graceful shutdown complete")
 }
