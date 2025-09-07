@@ -81,7 +81,3 @@ wb-test-task/
 # ERD-схема бд
 <img width="1035" height="706" alt="image" src="https://github.com/user-attachments/assets/084bb3c0-2ebd-4f6e-a6c2-f526f99f2723" />
 
-# Настройка окружения
-1. Скопируйте шаблон: `cp .env.example .env`
-2. Отредактируйте `.env` под своё окружение.
-3. Запуск: `go run ./cmd/main.go` (см. конфиг ниже).
