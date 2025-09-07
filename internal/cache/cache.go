@@ -2,96 +2,91 @@ package cache
 
 import (
 	"container/list"
-	"context"
-	"fmt"
+	"hash/fnv"
 	"sync"
 	"time"
-	"wb-test-task/internal/db"
 )
 
-type LRUCache struct { // LRU значит Least Recently Used - наименее используемый в данный момент
-	capacity int                      // количество элементов в кэше
-	ttl      time.Duration            // время жизни элемента в кэше
-	items    map[string]*list.Element // map для хранения элементов
-	list     *list.List               // список для хранения элементов в порядке использования
-	mu       sync.Mutex               // мьютекс для синхронизации доступа к кэшу
+type cacheItem[V any] struct {
+	key       string
+	value     V
+	expiresAt time.Time
 }
 
-type cacheItem struct {
-	key       string      // ключ - orderUID
-	value     interface{} // значение - *models.Order
-	expiresAt time.Time   // время истечения срока действия
+type shard[V any] struct {
+	mu    sync.RWMutex
+	items map[string]*list.Element
+	lru   *list.List
 }
 
-func NewLRUCache(capacity int, ttl time.Duration) *LRUCache {
-	return &LRUCache{
-		capacity: capacity,
-		ttl:      ttl,
-		items:    make(map[string]*list.Element), // инициализируем map
-		list:     list.New(),                     // инициализируем список
+type ShardedLRU[V any] struct {
+	shards   []shard[V]
+	capacity int
+	ttl      time.Duration
+}
+
+func NewShardedLRU[V any](numShards int, capacity int, ttl time.Duration) *ShardedLRU[V] {
+	if numShards <= 0 {
+		numShards = 16
 	}
+	s := make([]shard[V], numShards)
+	for i := range s {
+		s[i] = shard[V]{items: make(map[string]*list.Element), lru: list.New()}
+	}
+	return &ShardedLRU[V]{shards: s, capacity: capacity / numShards, ttl: ttl}
 }
 
-// Добавляем элемент в кэш или обновляем существующий
-func (c *LRUCache) Set(key string, value interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *ShardedLRU[V]) shardFor(key string) *shard[V] {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return &c.shards[int(h.Sum32())%len(c.shards)]
+}
 
-	if elem, exists := c.items[key]; exists { // если элемент уже существует, обновляем его
-		c.list.MoveToFront(elem) // перемещаем элемент в начало списка
-		elem.Value.(*cacheItem).value = value
-		elem.Value.(*cacheItem).expiresAt = time.Now().Add(c.ttl)
+func (c *ShardedLRU[V]) Get(key string) (V, bool) {
+	s := c.shardFor(key)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if el, ok := s.items[key]; ok {
+		it := el.Value.(cacheItem[V])
+		if time.Now().After(it.expiresAt) {
+			return *new(V), false
+		}
+		return it.value, true
+	}
+	return *new(V), false
+}
+
+func (c *ShardedLRU[V]) Set(key string, value V) {
+	s := c.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if el, ok := s.items[key]; ok {
+		el.Value = cacheItem[V]{key: key, value: value, expiresAt: time.Now().Add(c.ttl)}
+		s.lru.MoveToFront(el)
 		return
 	}
 
-	if c.list.Len() >= c.capacity { // если кэш заполнен, удаляем самый старый элемент
-		oldest := c.list.Back()
-		delete(c.items, oldest.Value.(*cacheItem).key)
-		c.list.Remove(oldest)
+	if s.lru.Len() >= c.capacity && c.capacity > 0 {
+		tail := s.lru.Back()
+		if tail != nil {
+			del := tail.Value.(cacheItem[V]).key
+			s.lru.Remove(tail)
+			delete(s.items, del)
+		}
 	}
 
-	item := &cacheItem{ // создаем новый элемент
-		key:       key,
-		value:     value,
-		expiresAt: time.Now().Add(c.ttl),
-	}
-
-	elem := c.list.PushFront(item) // добавляем элемент в начало списка
-	c.items[key] = elem            // добавляем элемент в map
+	el := s.lru.PushFront(cacheItem[V]{key: key, value: value, expiresAt: time.Now().Add(c.ttl)})
+	s.items[key] = el
 }
 
-// Восстановка кэша из БД
-func (c *LRUCache) Restore(ctx context.Context, repo *db.Repository) error {
-	// Получаем все элементы из БД
-	orders, err := repo.GetAllOrders(ctx)
-	if err != nil {
-		return fmt.Errorf("Не удалось восстановить кэш из БД: %w", err)
+func (c *ShardedLRU[V]) Delete(key string) {
+	s := c.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if el, ok := s.items[key]; ok {
+		s.lru.Remove(el)
+		delete(s.items, key)
 	}
-
-	// Записываем их в кэш
-	for _, order := range orders {
-		c.Set(order.OrderUID, &order)
-	}
-
-	return nil
-}
-
-// Получаем элемент из кэша по ключу
-func (c *LRUCache) Get(key string) (interface{}, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	elem, exists := c.items[key]
-	if !exists {
-		return nil, false
-	}
-
-	if time.Now().After(elem.Value.(*cacheItem).expiresAt) { // если элемент устарел, удаляем его
-		c.list.Remove(elem)
-		delete(c.items, key)
-		return nil, false
-	}
-
-	c.list.MoveToFront(elem)
-	return elem.Value.(*cacheItem).value, true
 }

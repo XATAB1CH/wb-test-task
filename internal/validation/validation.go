@@ -10,7 +10,7 @@ var v *validator.Validate
 
 func init() {
 	v = validator.New()
-	// ISO4217: три буквы (упрощённая проверка)
+	// ISO4217: три заглавные буквы
 	_ = v.RegisterValidation("iso4217", func(fl validator.FieldLevel) bool {
 		s := strings.TrimSpace(fl.Field().String())
 		if len(s) != 3 {

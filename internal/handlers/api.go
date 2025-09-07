@@ -22,7 +22,7 @@ func (h *OrderHandler) GetOrderByUID(c *gin.Context) {
 
 	uid := c.Param("orderId")
 
-	order, err := h.svc.GetOrder(ctx, uid)
+	order, err := h.svc.GetOrderByUID(ctx, uid)
 	if err != nil { // Если возникла ошибка, возвращаем HTTP статус 404 и сообщение об ошибке
 		respondWithJSON(c.Writer, http.StatusNotFound, gin.H{"error": err.Error()})
 		return
